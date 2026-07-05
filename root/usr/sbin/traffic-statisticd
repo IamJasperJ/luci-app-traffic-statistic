@@ -29,16 +29,32 @@ safe_device() {
 	[ "${#1}" -le 15 ]
 }
 
-resolve_device() {
-	local section="$1" device network
-	config_get device "$section" device
-	config_get network "$section" network
-	if [ -z "$device" ] && safe_id "$network"; then
-		device="$(ubus -S call "network.interface.${network}" status 2>/dev/null | jsonfilter -e '@.l3_device' 2>/dev/null)"
+resolve_devices() {
+	local section="$1" devices="" devs nets dev net l3_dev
+	config_get devs "$section" device
+	config_get nets "$section" network
+	for dev in $devs; do
+		safe_device "$dev" || continue
+		if [ -d "/sys/class/net/${dev}" ]; then
+			devices="${devices}${devices:+ }${dev}"
+		fi
+	done
+	for net in $nets; do
+		if [ -d "/sys/class/net/${net}" ]; then
+			safe_device "$net" && devices="${devices}${devices:+ }${net}"
+			continue
+		fi
+		if safe_id "$net"; then
+			l3_dev="$(ubus -S call "network.interface.${net}" status 2>/dev/null | jsonfilter -e '@.l3_device' 2>/dev/null)"
+			if [ -n "$l3_dev" ] && safe_device "$l3_dev" && [ -d "/sys/class/net/${l3_dev}" ]; then
+				devices="${devices}${devices:+ }${l3_dev}"
+			fi
+		fi
+	done
+	if [ -n "$devices" ]; then
+		printf '%s\n' "$devices" | tr ' ' '\n' | sort -u | tr '\n' ' '
+		printf '\n'
 	fi
-	safe_device "$device" || return 1
-	[ -d "/sys/class/net/${device}" ] || return 1
-	printf '%s\n' "$device"
 }
 
 nft_string_set() {
@@ -59,11 +75,12 @@ append_sets() {
 
 append_group_rules() {
 	local section="$1" index="$2"
-	local enabled interval retention device network prefix family table ports port match
+	local enabled interval retention devices network prefix family ports port match dev br_ports inet_devs
 	config_get_bool enabled "$section" enabled 1
 	[ "$enabled" = "1" ] || return 0
-	device="$(resolve_device "$section")" || {
-		log "group ${section}: unable to resolve an active device"
+	devices="$(resolve_devices "$section")" || devices=""
+	[ -n "$devices" ] || {
+		log "group ${section}: unable to resolve any active devices"
 		printf '%s|%s||||0|0|unavailable\n' "$section" "g${index}" >>"$GROUPS_FILE"
 		return 0
 	}
@@ -74,41 +91,48 @@ append_group_rules() {
 	valid_uint "$retention" 1 3650 || retention=30
 	prefix="g${index}"
 
-	if [ -d "/sys/class/net/${device}/bridge" ]; then
-		family="bridge"
-		table="$BR_TABLE"
-		ports=""
-		for port_path in "/sys/class/net/${device}/brif/"*; do
-			[ -e "$port_path" ] || continue
-			port="${port_path##*/}"
-			safe_device "$port" && ports="${ports}${ports:+ }${port}"
-		done
-		[ -n "$ports" ] || {
-			log "group ${section}: bridge ${device} has no member ports"
-			printf '%s|%s|%s|%s|%s|%s|%s|unavailable\n' "$section" "$prefix" "$network" "$device" "$family" "$interval" "$retention" >>"$GROUPS_FILE"
-			return 0
-		}
+	br_ports=""
+	inet_devs=""
+	for dev in $devices; do
+		if [ -d "/sys/class/net/${dev}/bridge" ]; then
+			for port_path in "/sys/class/net/${dev}/brif/"*; do
+				[ -e "$port_path" ] || continue
+				port="${port_path##*/}"
+				safe_device "$port" && br_ports="${br_ports}${br_ports:+ }${port}"
+			done
+		else
+			inet_devs="${inet_devs}${inet_devs:+ }${dev}"
+		fi
+	done
+
+	family=""
+	if [ -n "$br_ports" ]; then
+		br_ports="$(printf '%s\n' "$br_ports" | tr ' ' '\n' | sort -u | tr '\n' ' ')"
 		# shellcheck disable=SC2086
-		match="$(nft_string_set $ports)"
+		match="$(nft_string_set $br_ports)"
 		append_sets "$RUNDIR/bridge.sets" "$prefix" "$MAX_DEVICES"
 		printf '\t\tiifname %s ether type ip update @%s_tx4 { ether saddr }\n' "$match" "$prefix" >>"$RUNDIR/bridge.pre"
 		printf '\t\tiifname %s ether type ip6 update @%s_tx6 { ether saddr }\n' "$match" "$prefix" >>"$RUNDIR/bridge.pre"
 		printf '\t\toifname %s ether type ip update @%s_rx4 { ether daddr }\n' "$match" "$prefix" >>"$RUNDIR/bridge.post"
 		printf '\t\toifname %s ether type ip6 update @%s_rx6 { ether daddr }\n' "$match" "$prefix" >>"$RUNDIR/bridge.post"
 		HAS_BRIDGE=1
-	else
-		family="inet"
-		table="$L3_TABLE"
-		append_sets "$RUNDIR/inet.sets" "$prefix" "$MAX_DEVICES"
-		# At L3 postrouting the Ethernet header may not exist yet. Use a
-		# well-known pseudo MAC so both directions still have reliable totals.
-		printf '\t\tiifname "%s" meta nfproto ipv4 update @%s_tx4 { 00:00:00:00:00:00 }\n' "$device" "$prefix" >>"$RUNDIR/inet.pre"
-		printf '\t\tiifname "%s" meta nfproto ipv6 update @%s_tx6 { 00:00:00:00:00:00 }\n' "$device" "$prefix" >>"$RUNDIR/inet.pre"
-		printf '\t\toifname "%s" meta nfproto ipv4 update @%s_rx4 { 00:00:00:00:00:00 }\n' "$device" "$prefix" >>"$RUNDIR/inet.post"
-		printf '\t\toifname "%s" meta nfproto ipv6 update @%s_rx6 { 00:00:00:00:00:00 }\n' "$device" "$prefix" >>"$RUNDIR/inet.post"
-		HAS_INET=1
+		family="bridge"
 	fi
-	printf '%s|%s|%s|%s|%s|%s|%s|ready\n' "$section" "$prefix" "$network" "$device" "$family" "$interval" "$retention" >>"$GROUPS_FILE"
+
+	if [ -n "$inet_devs" ]; then
+		inet_devs="$(printf '%s\n' "$inet_devs" | tr ' ' '\n' | sort -u | tr '\n' ' ')"
+		append_sets "$RUNDIR/inet.sets" "$prefix" "$MAX_DEVICES"
+		for dev in $inet_devs; do
+			printf '\t\tiifname "%s" meta nfproto ipv4 update @%s_tx4 { ether saddr & 00:00:00:00:00:00 }\n' "$dev" "$prefix" >>"$RUNDIR/inet.pre"
+			printf '\t\tiifname "%s" meta nfproto ipv6 update @%s_tx6 { ether saddr & 00:00:00:00:00:00 }\n' "$dev" "$prefix" >>"$RUNDIR/inet.pre"
+			printf '\t\toifname "%s" meta nfproto ipv4 update @%s_rx4 { ether saddr & 00:00:00:00:00:00 }\n' "$dev" "$prefix" >>"$RUNDIR/inet.post"
+			printf '\t\toifname "%s" meta nfproto ipv6 update @%s_rx6 { ether saddr & 00:00:00:00:00:00 }\n' "$dev" "$prefix" >>"$RUNDIR/inet.post"
+		done
+		HAS_INET=1
+		[ -n "$family" ] && family="bridge inet" || family="inet"
+	fi
+
+	printf '%s|%s|%s|%s|%s|%s|%s|ready\n' "$section" "$prefix" "$network" "$devices" "$family" "$interval" "$retention" >>"$GROUPS_FILE"
 }
 
 build_rules() {
@@ -220,7 +244,10 @@ collect_group() {
 	for kind in rx4 rx6 tx4 tx6; do
 		current="$RUNDIR/${prefix}_${kind}.current"
 		previous="$RUNDIR/${prefix}_${kind}.previous"
-		read_set "$family" "$table" "${prefix}_${kind}" >"$current"
+		{
+			read_set "bridge" "$BR_TABLE" "${prefix}_${kind}"
+			read_set "inet" "$L3_TABLE" "${prefix}_${kind}"
+		} | awk '{ bytes[$1]+=$2 } END { for (mac in bytes) print mac, bytes[mac] }' >"$current"
 		[ -f "$previous" ] || : >"$previous"
 		awk -v kind="$kind" '
 			FILENAME == ARGV[1] { old[$1]=$2; next }
@@ -252,12 +279,14 @@ collect_group() {
 }
 
 initialize_snapshots() {
-	local section prefix network device family interval retention state table kind
+	local section prefix network device family interval retention state kind
 	while IFS='|' read -r section prefix network device family interval retention state; do
 		[ "$state" = "ready" ] || continue
-		[ "$family" = "bridge" ] && table="$BR_TABLE" || table="$L3_TABLE"
 		for kind in rx4 rx6 tx4 tx6; do
-			read_set "$family" "$table" "${prefix}_${kind}" >"$RUNDIR/${prefix}_${kind}.previous"
+			{
+				read_set "bridge" "$BR_TABLE" "${prefix}_${kind}"
+				read_set "inet" "$L3_TABLE" "${prefix}_${kind}"
+			} | awk '{ bytes[$1]+=$2 } END { for (mac in bytes) print mac, bytes[mac] }' >"$RUNDIR/${prefix}_${kind}.previous"
 		done
 		date +%s >"$RUNDIR/${prefix}.last"
 	done <"$GROUPS_FILE"

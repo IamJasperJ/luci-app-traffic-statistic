@@ -8,12 +8,14 @@ return view.extend({
 	load: function() {
 		return Promise.all([
 			uci.load('traffic_statistic'),
-			network.getNetworks()
+			network.getNetworks(),
+			network.getDevices()
 		]);
 	},
 
 	render: function(data) {
 		var networks = data[1] || [];
+		var devices = data[2] || [];
 		var m = new form.Map('traffic_statistic', _('Traffic Statistics'),
 			_('Traffic is counted in the kernel and written in batches. Receive and transmit are shown from the client device perspective.'));
 
@@ -42,6 +44,7 @@ return view.extend({
 
 		s = m.section(form.GridSection, 'interface', _('Interface groups'));
 		s.addremove = true;
+		s.anonymous = true;
 		s.nodescriptions = true;
 		s.sectiontitle = function(sectionId) {
 			return uci.get('traffic_statistic', sectionId, 'name') || sectionId;
@@ -56,11 +59,22 @@ return view.extend({
 		o.placeholder = _('LAN');
 		o.rmempty = false;
 
-		o = s.option(form.ListValue, 'network', _('Network'));
+		o = s.option(form.MultiValue, 'network', _('Networks / Interfaces'));
 		o.rmempty = false;
+		var seen = {};
 		networks.forEach(function(net) {
 			var name = net.getName();
-			o.value(name, name);
+			if (!seen[name]) {
+				o.value(name, _('Network: %s').format(name));
+				seen[name] = true;
+			}
+		});
+		devices.forEach(function(dev) {
+			var name = dev.getName();
+			if (!seen[name]) {
+				o.value(name, _('Interface: %s').format(name));
+				seen[name] = true;
+			}
 		});
 
 		o = s.option(form.Value, 'device', _('Device override'));
