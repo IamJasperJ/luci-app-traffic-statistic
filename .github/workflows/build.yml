@@ -10,7 +10,27 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            openwrt_version: 23.05.5
+            sdk_url_path: https://downloads.openwrt.org/releases/23.05.5/targets/x86/64
+            sdk_name: -sdk-23.05.5-x86-64_
+          - arch: armv8a
+            openwrt_version: 23.05.5
+            sdk_url_path: https://downloads.openwrt.org/releases/23.05.5/targets/armsr/armv8
+            sdk_name: -sdk-23.05.5-armsr-armv8_
+          - arch: x86_64
+            openwrt_version: 25.12.5
+            sdk_url_path: https://downloads.openwrt.org/releases/25.12.5/targets/x86/64
+            sdk_name: -sdk-25.12.5-x86-64_
+          - arch: armv8a
+            openwrt_version: 25.12.5
+            sdk_url_path: https://downloads.openwrt.org/releases/25.12.5/targets/armsr/armv8
+            sdk_name: -sdk-25.12.5-armsr-armv8_
 
     steps:
       - name: Check out source
@@ -46,20 +66,57 @@ jobs:
             --exclude '*.ipk' \
             ./ .ci-feed/luci-app-traffic-statistic/
 
-      - name: Build package with the OpenWrt SDK
-        uses: openwrt/gh-action-sdk@main
+      - name: Install SDK extraction tools
+        run: sudo apt-get update && sudo apt-get install -y zstd
+
+      - name: Download and extract OpenWrt SDK
+        id: sdk
+        shell: bash
         env:
-          ARCH: x86_64-24.10.2
-          BUILD_LOG: 1
-          FEED_DIR: ${{ github.workspace }}/.ci-feed
-          PACKAGES: luci-app-traffic-statistic
-          V: s
+          SDK_URL_PATH: ${{ matrix.sdk_url_path }}
+          SDK_NAME: ${{ matrix.sdk_name }}
+        run: |
+          set -euo pipefail
+          sdk_file="$(curl -fsSL "${SDK_URL_PATH}/" |
+            sed -n 's/.*href="\([^"]*\)".*/\1/p' |
+            grep -F -- "$SDK_NAME" |
+            grep -E '\.tar\.(xz|zst)$' |
+            head -n 1)"
+          test -n "$sdk_file"
+          curl -fL --retry 3 -o "$sdk_file" "${SDK_URL_PATH}/${sdk_file}"
+          curl -fsSL "${SDK_URL_PATH}/sha256sums" |
+            grep -F " *${sdk_file}" > sdk.sha256
+          sha256sum -c sdk.sha256
+          mkdir sdk
+          tar -xf "$sdk_file" -C sdk --strip-components=1
+          echo "dir=${GITHUB_WORKSPACE}/sdk" >> "$GITHUB_OUTPUT"
+
+      - name: Build package
+        shell: bash
+        working-directory: ${{ steps.sdk.outputs.dir }}
+        run: |
+          set -euo pipefail
+          printf '\nsrc-link traffic_statistic %s/.ci-feed\n' "$GITHUB_WORKSPACE" >> feeds.conf.default
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+          make defconfig
+          make package/luci-app-traffic-statistic/compile V=s
+
+      - name: Collect packages and logs
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p artifacts logs
+          find sdk/bin -type f \( -name 'luci-app-traffic-statistic*.ipk' -o -name 'luci-app-traffic-statistic*.apk' \) \
+            -exec cp -v {} artifacts/ \; 2>/dev/null || true
+          find sdk/logs -type f -exec cp --parents {} logs/ \; 2>/dev/null || true
 
       - name: Upload package and build logs
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: luci-app-traffic-statistic-${{ steps.version.outputs.version }}-x86_64-24.10.2
+          name: luci-app-traffic-statistic-${{ steps.version.outputs.version }}-openwrt-${{ matrix.openwrt_version }}-${{ matrix.arch }}
           path: |
-            bin/packages/**/*.ipk
+            artifacts/*
             logs/**
           if-no-files-found: error
