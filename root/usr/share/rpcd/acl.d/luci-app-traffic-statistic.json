@@ -1,0 +1,17 @@
+{
+	"luci-app-traffic-statistic": {
+		"description": "Grant access to traffic statistics",
+		"read": {
+			"uci": [ "traffic_statistic" ],
+			"ubus": {
+				"traffic-statistic": [ "status", "query" ]
+			}
+		},
+		"write": {
+			"uci": [ "traffic_statistic" ],
+			"ubus": {
+				"traffic-statistic": [ "clear" ]
+			}
+		}
+	}
+}

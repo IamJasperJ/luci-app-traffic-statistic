@@ -1,0 +1,295 @@
+#!/bin/sh
+
+. /lib/functions.sh
+. /usr/share/libubox/jshn.sh
+
+CONFIG="traffic_statistic"
+RUNDIR="/tmp/traffic-statistic"
+
+valid_id() {
+	case "$1" in ''|*[!A-Za-z0-9_-]*) return 1 ;; esac
+}
+
+valid_uint() {
+	case "$1" in ''|*[!0-9]*) return 1 ;; esac
+	[ "$1" -ge "$2" ] 2>/dev/null && [ "$1" -le "$3" ] 2>/dev/null
+}
+
+storage_path() {
+	local path
+	path="$(uci -q get ${CONFIG}.main.storage_path)"
+	case "$path" in /*) ;; *) path=/etc/traffic-statistic/data ;; esac
+	case "$path" in \
+		/|/bin|/boot|/dev|/etc|/lib|/mnt|/overlay|/proc|/root|/run|/sbin|/sys|/tmp|/usr|/var|\
+		*'..'*|*'|'*|*[[:space:]]*) path=/etc/traffic-statistic/data ;;
+	esac
+	printf '%s\n' "$path"
+}
+
+group_exists() {
+	[ "$(uci -q get "${CONFIG}.${1}")" = "interface" ]
+}
+
+runtime_field() {
+	local group="$1" field="$2"
+	awk -F '|' -v group="$group" -v field="$field" '$1 == group { print $field; exit }' "$RUNDIR/groups" 2>/dev/null
+}
+
+latest_timestamp() {
+	local dir="$1" file line latest=0 ts
+	for file in "$dir"/*.csv; do
+		[ -f "$file" ] || continue
+		line="$(tail -n 1 "$file" 2>/dev/null)"
+		ts="${line%%,*}"
+		valid_uint "$ts" 0 4294967295 && [ "$ts" -gt "$latest" ] && latest="$ts"
+	done
+	printf '%s\n' "$latest"
+}
+
+add_group_status() {
+	local section="$1" name network device interval retention enabled state family bytes latest dir path
+	config_get name "$section" name "$section"
+	config_get network "$section" network
+	config_get interval "$section" interval 300
+	config_get retention "$section" retention_days 30
+	config_get_bool enabled "$section" enabled 1
+	device="$(runtime_field "$section" 4)"
+	family="$(runtime_field "$section" 5)"
+	state="$(runtime_field "$section" 8)"
+	[ -n "$state" ] || state="stopped"
+	path="$(storage_path)"
+	dir="${path}/${section}"
+	bytes="$(du -sk "$dir" 2>/dev/null | awk '{ print $1 * 1024 }')"
+	bytes="${bytes:-0}"
+	latest="$(latest_timestamp "$dir")"
+
+	json_add_object ""
+	json_add_string id "$section"
+	json_add_string name "$name"
+	json_add_string network "${network:-}"
+	json_add_string device "${device:-}"
+	json_add_string family "${family:-}"
+	json_add_string state "$state"
+	json_add_boolean enabled "$enabled"
+	json_add_int interval "$interval"
+	json_add_int retention_days "$retention"
+	json_add_int storage_bytes "$bytes"
+	json_add_int latest "$latest"
+	json_close_object
+}
+
+load_static_hosts() {
+	local section="$1" mac ip name
+	config_get mac "$section" mac
+	config_get ip "$section" ip
+	config_get name "$section" name
+	local m
+	for m in $mac; do
+		[ -n "$m" ] && [ -n "$ip" ] && printf 'static %s %s %s\n' "$m" "$ip" "${name:-}"
+	done
+}
+
+status_call() {
+	local pid running=0 enabled path mac ip host flags tmpfile
+	pid="$(pidof traffic-statisticd 2>/dev/null)"
+	[ -n "$pid" ] && running=1
+	enabled="$(uci -q get ${CONFIG}.main.enabled)"
+	path="$(storage_path)"
+
+	json_init
+	json_add_boolean running "$running"
+	json_add_boolean enabled "${enabled:-1}"
+	json_add_string storage_path "$path"
+	json_add_array groups
+	config_load "$CONFIG"
+	config_foreach add_group_status interface
+	json_close_array
+	json_add_array hosts
+
+	tmpfile="$(mktemp /tmp/ts-hosts.XXXXXX)" || {
+		json_close_array
+		json_dump
+		json_cleanup
+		return 1
+	}
+	trap 'rm -f "$tmpfile"' EXIT HUP INT TERM
+	{
+		if [ -f /tmp/dhcp.leases ]; then
+			while read -r _ mac ip name _; do
+				[ "$mac" = "*" ] || printf 'lease %s %s %s\n' "$mac" "$ip" "$name"
+			done </tmp/dhcp.leases
+		fi
+		config_load dhcp
+		config_foreach load_static_hosts host
+		if [ -f /proc/net/arp ]; then
+			while read -r ip _ flags mac _ _; do
+				case "$flags:$mac" in
+					0x2:??:??:??:??:??:??)
+						[ "$mac" = "00:00:00:00:00:00" ] || printf 'arp %s %s\n' "$mac" "$ip"
+					;;
+				esac
+			done </proc/net/arp
+		fi
+		if [ -f /etc/hosts ]; then
+			awk '/^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/ { print "host", $1, $2 }' /etc/hosts
+		fi
+	} | awk '
+		$1 == "lease" {
+			mac=tolower($2); ip=$3; name=$4
+			if (mac ~ /^[0-9a-f]{2}(:[0-9a-f]{2}){5}$/) {
+				mac_to_ip[mac] = ip
+				if (name != "" && name != "*") mac_to_name[mac] = name
+			}
+		}
+		$1 == "static" {
+			mac=tolower($2); ip=$3; name=$4
+			if (mac ~ /^[0-9a-f]{2}(:[0-9a-f]{2}){5}$/) {
+				mac_to_ip[mac] = ip
+				if (name != "") mac_to_name[mac] = name
+			}
+		}
+		$1 == "arp" {
+			mac=tolower($2); ip=$3
+			if (mac ~ /^[0-9a-f]{2}(:[0-9a-f]{2}){5}$/) {
+				if (!mac_to_ip[mac]) mac_to_ip[mac] = ip
+			}
+		}
+		$1 == "host" {
+			ip=$2; name=$3
+			if (name != "") ip_to_name[ip] = name
+		}
+		END {
+			for (mac in mac_to_ip) {
+				ip = mac_to_ip[mac]
+				name = mac_to_name[mac]
+				if (name == "" && ip != "") name = ip_to_name[ip]
+				print mac, ip, name
+			}
+		}
+	' > "$tmpfile"
+
+	while read -r mac ip host _; do
+		[ -n "$mac" ] || continue
+		json_add_object ""
+		json_add_string mac "$mac"
+		json_add_string ip "$ip"
+		json_add_string name "$host"
+		json_close_object
+	done < "$tmpfile"
+	rm -f "$tmpfile"
+	trap - EXIT HUP INT TERM
+
+	json_close_array
+	json_dump
+	json_cleanup
+}
+
+stream_group_data() {
+	local dir="$1" file
+	for file in "$dir"/*.csv; do
+		[ -f "$file" ] || continue
+		cat "$file"
+	done
+}
+
+query_call() {
+	local input group start end bucket mac dir now path
+	read -r input
+	json_load "$input" || { echo '{"error":"invalid request"}'; return 1; }
+	json_get_var group group
+	json_get_var start start
+	json_get_var end end
+	json_get_var bucket bucket
+	json_get_var mac mac
+	json_cleanup
+	if ! valid_id "$group" || ! group_exists "$group"; then
+		echo '{"error":"invalid group"}'
+		return 1
+	fi
+	now="$(date +%s)"
+	valid_uint "$end" 1 4294967295 || end="$now"
+	valid_uint "$start" 0 4294967295 || start=$((end - 86400))
+	[ "$start" -le "$end" ] || { echo '{"error":"invalid range"}'; return 1; }
+	valid_uint "$bucket" 60 2678400 || bucket=300
+	case "$mac" in ''|??:??:??:??:??:??) ;; *) echo '{"error":"invalid MAC"}'; return 1 ;; esac
+	mac="$(printf '%s' "$mac" | tr 'A-F' 'a-f')"
+	path="$(storage_path)"
+	dir="${path}/${group}"
+
+	stream_group_data "$dir" | \
+		awk -F ',' -v start="$start" -v end="$end" '
+			NF >= 6 && $1 >= start && $1 <= end && length($2) == 17 && $2 !~ /[^0-9A-Fa-f:]/ { print }
+		' | sort -t ',' -k 1,1n | \
+		awk -F ',' -v start="$start" -v end="$end" -v bucket="$bucket" -v wanted="$mac" '
+		function emit_point(    comma) {
+			if (!have_bucket) return
+			comma=(point_count++ ? "," : "")
+			printf "%s{\"t\":%.0f,\"rx4\":%.0f,\"rx6\":%.0f,\"tx4\":%.0f,\"tx6\":%.0f}", comma, current, prx4, prx6, ptx4, ptx6
+		}
+		BEGIN { printf "{\"points\":[" }
+		NF >= 6 && $1 >= start && $1 <= end && (wanted == "" || tolower($2) == wanted) {
+			b=int($1 / bucket) * bucket
+			if (have_bucket && b != current) {
+				emit_point()
+				prx4=prx6=ptx4=ptx6=0
+			}
+			current=b; have_bucket=1
+			prx4+=$3; prx6+=$4; ptx4+=$5; ptx6+=$6
+			total_rx4+=$3; total_rx6+=$4; total_tx4+=$5; total_tx6+=$6
+			m=tolower($2); seen[m]=1
+			drx4[m]+=$3; drx6[m]+=$4; dtx4[m]+=$5; dtx6[m]+=$6
+		}
+		END {
+			emit_point()
+			printf "],\"devices\":["
+			comma=""
+			for (m in seen) {
+				printf "%s{\"mac\":\"%s\",\"rx4\":%.0f,\"rx6\":%.0f,\"tx4\":%.0f,\"tx6\":%.0f}", comma, m, drx4[m], drx6[m], dtx4[m], dtx6[m]
+				comma="," 
+			}
+			printf "],\"totals\":{\"rx4\":%.0f,\"rx6\":%.0f,\"tx4\":%.0f,\"tx6\":%.0f},\"start\":%.0f,\"end\":%.0f,\"bucket\":%.0f}\n", total_rx4, total_rx6, total_tx4, total_tx6, start, end, bucket
+		}'
+}
+
+clear_call() {
+	local input group path
+	read -r input
+	json_load "$input" || { echo '{"result":1}'; return 1; }
+	json_get_var group group
+	json_cleanup
+	if ! valid_id "$group" || ! group_exists "$group"; then
+		echo '{"result":2}'
+		return 1
+	fi
+	path="$(storage_path)"
+	rm -rf "${path:?}/${group}"
+	echo '{"result":0}'
+}
+
+case "$1" in
+	list)
+		json_init
+		json_add_object status
+		json_close_object
+		json_add_object query
+		json_add_string group string
+		json_add_int start 0
+		json_add_int end 0
+		json_add_int bucket 0
+		json_add_string mac string
+		json_close_object
+		json_add_object clear
+		json_add_string group string
+		json_close_object
+		json_dump
+		json_cleanup
+	;;
+	call)
+		case "$2" in
+			status) status_call ;;
+			query) query_call ;;
+			clear) clear_call ;;
+			*) echo '{"error":"unknown method"}'; exit 1 ;;
+		esac
+	;;
+esac

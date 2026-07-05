@@ -1,0 +1,317 @@
+#!/bin/sh
+
+. /lib/functions.sh
+
+CONFIG="traffic_statistic"
+RUNDIR="/tmp/traffic-statistic"
+BR_TABLE="luci_traffic_statistic"
+L3_TABLE="luci_traffic_stat_l3"
+RULES="${RUNDIR}/rules.nft"
+GROUPS_FILE="${RUNDIR}/groups"
+POLL_SECONDS=15
+
+log() {
+	logger -t traffic-statistic "$*"
+}
+
+valid_uint() {
+	case "$1" in ''|*[!0-9]*) return 1 ;; esac
+	[ "$1" -ge "$2" ] 2>/dev/null && [ "$1" -le "$3" ] 2>/dev/null
+}
+
+safe_id() {
+	case "$1" in ''|*[!A-Za-z0-9_-]*) return 1 ;; esac
+	return 0
+}
+
+safe_device() {
+	case "$1" in ''|*[!A-Za-z0-9_.:-]*) return 1 ;; esac
+	[ "${#1}" -le 15 ]
+}
+
+resolve_device() {
+	local section="$1" device network
+	config_get device "$section" device
+	config_get network "$section" network
+	if [ -z "$device" ] && safe_id "$network"; then
+		device="$(ubus -S call "network.interface.${network}" status 2>/dev/null | jsonfilter -e '@.l3_device' 2>/dev/null)"
+	fi
+	safe_device "$device" || return 1
+	[ -d "/sys/class/net/${device}" ] || return 1
+	printf '%s\n' "$device"
+}
+
+nft_string_set() {
+	local out="" item
+	for item in "$@"; do
+		[ -n "$item" ] || continue
+		out="${out}${out:+, }\"${item}\""
+	done
+	printf '{ %s }' "$out"
+}
+
+append_sets() {
+	local file="$1" prefix="$2" max="$3" kind
+	for kind in rx4 rx6 tx4 tx6; do
+		printf '\tset %s_%s { type ether_addr; size %s; flags dynamic; counter; }\n' "$prefix" "$kind" "$max" >>"$file"
+	done
+}
+
+append_group_rules() {
+	local section="$1" index="$2"
+	local enabled interval retention device network prefix family table ports port match
+	config_get_bool enabled "$section" enabled 1
+	[ "$enabled" = "1" ] || return 0
+	device="$(resolve_device "$section")" || {
+		log "group ${section}: unable to resolve an active device"
+		printf '%s|%s||||0|0|unavailable\n' "$section" "g${index}" >>"$GROUPS_FILE"
+		return 0
+	}
+	config_get interval "$section" interval 300
+	config_get retention "$section" retention_days 30
+	config_get network "$section" network
+	valid_uint "$interval" 60 86400 || interval=300
+	valid_uint "$retention" 1 3650 || retention=30
+	prefix="g${index}"
+
+	if [ -d "/sys/class/net/${device}/bridge" ]; then
+		family="bridge"
+		table="$BR_TABLE"
+		ports=""
+		for port_path in "/sys/class/net/${device}/brif/"*; do
+			[ -e "$port_path" ] || continue
+			port="${port_path##*/}"
+			safe_device "$port" && ports="${ports}${ports:+ }${port}"
+		done
+		[ -n "$ports" ] || {
+			log "group ${section}: bridge ${device} has no member ports"
+			printf '%s|%s|%s|%s|%s|%s|%s|unavailable\n' "$section" "$prefix" "$network" "$device" "$family" "$interval" "$retention" >>"$GROUPS_FILE"
+			return 0
+		}
+		# shellcheck disable=SC2086
+		match="$(nft_string_set $ports)"
+		append_sets "$RUNDIR/bridge.sets" "$prefix" "$MAX_DEVICES"
+		printf '\t\tiifname %s ether type ip update @%s_tx4 { ether saddr }\n' "$match" "$prefix" >>"$RUNDIR/bridge.pre"
+		printf '\t\tiifname %s ether type ip6 update @%s_tx6 { ether saddr }\n' "$match" "$prefix" >>"$RUNDIR/bridge.pre"
+		printf '\t\toifname %s ether type ip update @%s_rx4 { ether daddr }\n' "$match" "$prefix" >>"$RUNDIR/bridge.post"
+		printf '\t\toifname %s ether type ip6 update @%s_rx6 { ether daddr }\n' "$match" "$prefix" >>"$RUNDIR/bridge.post"
+		HAS_BRIDGE=1
+	else
+		family="inet"
+		table="$L3_TABLE"
+		append_sets "$RUNDIR/inet.sets" "$prefix" "$MAX_DEVICES"
+		# At L3 postrouting the Ethernet header may not exist yet. Use a
+		# well-known pseudo MAC so both directions still have reliable totals.
+		printf '\t\tiifname "%s" meta nfproto ipv4 update @%s_tx4 { 00:00:00:00:00:00 }\n' "$device" "$prefix" >>"$RUNDIR/inet.pre"
+		printf '\t\tiifname "%s" meta nfproto ipv6 update @%s_tx6 { 00:00:00:00:00:00 }\n' "$device" "$prefix" >>"$RUNDIR/inet.pre"
+		printf '\t\toifname "%s" meta nfproto ipv4 update @%s_rx4 { 00:00:00:00:00:00 }\n' "$device" "$prefix" >>"$RUNDIR/inet.post"
+		printf '\t\toifname "%s" meta nfproto ipv6 update @%s_rx6 { 00:00:00:00:00:00 }\n' "$device" "$prefix" >>"$RUNDIR/inet.post"
+		HAS_INET=1
+	fi
+	printf '%s|%s|%s|%s|%s|%s|%s|ready\n' "$section" "$prefix" "$network" "$device" "$family" "$interval" "$retention" >>"$GROUPS_FILE"
+}
+
+build_rules() {
+	local index=0 storage
+	rm -rf "$RUNDIR"
+	mkdir -p "$RUNDIR"
+	: >"$GROUPS_FILE"
+	: >"$RUNDIR/bridge.sets"
+	: >"$RUNDIR/bridge.pre"
+	: >"$RUNDIR/bridge.post"
+	: >"$RUNDIR/inet.sets"
+	: >"$RUNDIR/inet.pre"
+	: >"$RUNDIR/inet.post"
+
+	config_load "$CONFIG"
+	config_get storage main storage_path /etc/traffic-statistic/data
+	case "$storage" in /*) ;; *) storage=/etc/traffic-statistic/data ;; esac
+	case "$storage" in \
+		/|/bin|/boot|/dev|/etc|/lib|/mnt|/overlay|/proc|/root|/run|/sbin|/sys|/tmp|/usr|/var|\
+		*'..'*|*'|'*|*[[:space:]]*) storage=/etc/traffic-statistic/data ;;
+	esac
+	STORAGE="$storage"
+	config_get MAX_DEVICES main max_devices 256
+	valid_uint "$MAX_DEVICES" 16 4096 || MAX_DEVICES=256
+	HAS_BRIDGE=0
+	HAS_INET=0
+
+	build_one() {
+		append_group_rules "$1" "$index"
+		index=$((index + 1))
+	}
+	config_foreach build_one interface
+
+	: >"$RULES"
+	if [ "$HAS_BRIDGE" = "1" ]; then
+		{
+			printf 'table bridge %s {\n' "$BR_TABLE"
+			cat "$RUNDIR/bridge.sets"
+			printf '\tchain pre { type filter hook prerouting priority -350; policy accept;\n'
+			cat "$RUNDIR/bridge.pre"
+			printf '\t}\n\tchain post { type filter hook postrouting priority 350; policy accept;\n'
+			cat "$RUNDIR/bridge.post"
+			printf '\t}\n}\n'
+		} >>"$RULES"
+	fi
+	if [ "$HAS_INET" = "1" ]; then
+		{
+			printf 'table inet %s {\n' "$L3_TABLE"
+			cat "$RUNDIR/inet.sets"
+			printf '\tchain pre { type filter hook prerouting priority -350; policy accept;\n'
+			cat "$RUNDIR/inet.pre"
+			printf '\t}\n\tchain post { type filter hook postrouting priority 350; policy accept;\n'
+			cat "$RUNDIR/inet.post"
+			printf '\t}\n}\n'
+		} >>"$RULES"
+	fi
+}
+
+delete_tables() {
+	nft delete table bridge "$BR_TABLE" >/dev/null 2>&1 || true
+	nft delete table inet "$L3_TABLE" >/dev/null 2>&1 || true
+}
+
+load_rules() {
+	if [ ! -s "$RULES" ]; then
+		delete_tables
+		return 0
+	fi
+	check_rules || return 1
+	delete_tables
+	nft -f "$RULES"
+}
+
+check_rules() {
+	# Check with temporary names so validation also works while the live tables
+	# exist, and so a stale table left by SIGKILL cannot block recovery.
+	sed -e "s/${BR_TABLE}/${BR_TABLE}_check/g" \
+		-e "s/${L3_TABLE}/${L3_TABLE}_check/g" "$RULES" | nft -c -f -
+}
+
+read_set() {
+	local family="$1" table="$2" setname="$3"
+	nft -nn list set "$family" "$table" "$setname" 2>/dev/null | awk '
+		/elements =/ {
+			line=$0
+			sub(/^.*elements = \{[[:space:]]*/, "", line)
+			sub(/[[:space:]]*\}.*/, "", line)
+			n=split(line, items, /,[[:space:]]*/)
+			for (i=1; i<=n; i++) {
+				gsub(/^[[:space:]]+|[[:space:]]+$/, "", items[i])
+				m=split(items[i], f, /[[:space:]]+/)
+				if (m >= 6 && f[2] == "counter" && f[5] == "bytes")
+					print tolower(f[1]), f[6]
+			}
+		}'
+}
+
+collect_group() {
+	local section="$1" prefix="$2" family="$3" interval="$4" retention="$5"
+	local table now day dir kind current previous deltas rows
+	[ "$family" = "bridge" ] && table="$BR_TABLE" || table="$L3_TABLE"
+	now="$(date +%s)"
+	dir="${STORAGE}/${section}"
+	mkdir -p "$dir" || return 1
+	deltas="$RUNDIR/${prefix}.deltas"
+	rows="$RUNDIR/${prefix}.rows"
+	: >"$deltas"
+
+	for kind in rx4 rx6 tx4 tx6; do
+		current="$RUNDIR/${prefix}_${kind}.current"
+		previous="$RUNDIR/${prefix}_${kind}.previous"
+		read_set "$family" "$table" "${prefix}_${kind}" >"$current"
+		[ -f "$previous" ] || : >"$previous"
+		awk -v kind="$kind" '
+			FILENAME == ARGV[1] { old[$1]=$2; next }
+			{
+				d=$2-(old[$1]+0)
+				if (d < 0) d=$2
+				if (d > 0) print $1, kind, sprintf("%.0f", d)
+			}' "$previous" "$current" >>"$deltas"
+		mv "$current" "$previous"
+	done
+
+	awk -v ts="$now" '
+		{ mac[$1]=1; value[$1 SUBSEP $2]+=$3 }
+		END {
+			for (m in mac)
+				printf "%s,%s,%.0f,%.0f,%.0f,%.0f\n", ts, m,
+					value[m SUBSEP "rx4"]+0, value[m SUBSEP "rx6"]+0,
+					value[m SUBSEP "tx4"]+0, value[m SUBSEP "tx6"]+0
+		}' "$deltas" >"$rows"
+	if [ -s "$rows" ]; then
+		day="$(date +%Y%m%d)"
+		cat "$rows" >>"${dir}/${day}.csv"
+	fi
+
+	find "$dir" -type f -name '*.csv' -mtime "+${retention}" -print 2>/dev/null | while IFS= read -r oldfile; do
+		rm -f "$oldfile"
+	done
+	printf '%s\n' "$now" >"$RUNDIR/${prefix}.last"
+}
+
+initialize_snapshots() {
+	local section prefix network device family interval retention state table kind
+	while IFS='|' read -r section prefix network device family interval retention state; do
+		[ "$state" = "ready" ] || continue
+		[ "$family" = "bridge" ] && table="$BR_TABLE" || table="$L3_TABLE"
+		for kind in rx4 rx6 tx4 tx6; do
+			read_set "$family" "$table" "${prefix}_${kind}" >"$RUNDIR/${prefix}_${kind}.previous"
+		done
+		date +%s >"$RUNDIR/${prefix}.last"
+	done <"$GROUPS_FILE"
+}
+
+run_loop() {
+	local now section prefix network device family interval retention state last
+	initialize_snapshots
+	while :; do
+		now="$(date +%s)"
+		while IFS='|' read -r section prefix network device family interval retention state; do
+			[ "$state" = "ready" ] || continue
+			last="$(cat "$RUNDIR/${prefix}.last" 2>/dev/null)"
+			valid_uint "$last" 0 4294967295 || last=0
+			if [ "$now" -lt "$last" ]; then
+				printf '%s\n' "$now" >"$RUNDIR/${prefix}.last"
+				last="$now"
+			fi
+			if [ $((now - last)) -ge "$interval" ]; then
+				collect_group "$section" "$prefix" "$family" "$interval" "$retention" || log "group ${section}: collection failed"
+			fi
+		done <"$GROUPS_FILE"
+		sleep "$POLL_SECONDS" &
+		wait $!
+	done
+}
+
+main() {
+	umask 077
+	case "$1" in
+		--check|--print-rules)
+			RUNDIR="/tmp/traffic-statistic-check.$$"
+			RULES="${RUNDIR}/rules.nft"
+			GROUPS_FILE="${RUNDIR}/groups"
+			trap 'rm -rf "$RUNDIR"' EXIT
+		;;
+	esac
+	build_rules
+	case "$1" in
+		--check)
+			[ ! -s "$RULES" ] || check_rules
+			return $?
+		;;
+		--print-rules)
+			cat "$RULES"
+			return 0
+		;;
+	esac
+	load_rules || {
+		log "unable to load nftables accounting rules"
+		exit 1
+	}
+	trap 'delete_tables; exit 0' INT TERM
+	run_loop
+}
+
+main "$@"

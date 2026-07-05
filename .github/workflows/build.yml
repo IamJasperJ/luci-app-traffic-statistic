@@ -1,0 +1,65 @@
+name: Build OpenWrt package
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check source syntax
+        run: |
+          sh -n root/etc/init.d/traffic-statistic
+          sh -n root/usr/libexec/rpcd/traffic-statistic
+          sh -n root/usr/sbin/traffic-statisticd
+          node --check htdocs/luci-static/resources/view/traffic-statistic/config.js
+          node --check htdocs/luci-static/resources/view/traffic-statistic/overview.js
+
+      - name: Set package version
+        id: version
+        shell: bash
+        run: |
+          version="0.1.${GITHUB_RUN_NUMBER}"
+          sed -i -E "s/^PKG_VERSION:=.*/PKG_VERSION:=${version}/" Makefile
+          grep -q "^PKG_VERSION:=${version}$" Makefile
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "Building luci-app-traffic-statistic ${version}-1" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Prepare package feed
+        run: |
+          mkdir -p .ci-feed/luci-app-traffic-statistic
+          rsync -a \
+            --exclude '.ci-feed' \
+            --exclude '.git' \
+            --exclude '.github' \
+            --exclude '*.ipk' \
+            ./ .ci-feed/luci-app-traffic-statistic/
+
+      - name: Build package with the OpenWrt SDK
+        uses: openwrt/gh-action-sdk@main
+        env:
+          ARCH: x86_64-24.10.2
+          BUILD_LOG: 1
+          FEED_DIR: ${{ github.workspace }}/.ci-feed
+          PACKAGES: luci-app-traffic-statistic
+          V: s
+
+      - name: Upload package and build logs
+        uses: actions/upload-artifact@v4
+        with:
+          name: luci-app-traffic-statistic-${{ steps.version.outputs.version }}-x86_64-24.10.2
+          path: |
+            bin/packages/**/*.ipk
+            logs/**
+          if-no-files-found: error

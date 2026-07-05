@@ -1,0 +1,187 @@
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Language: zh_CN\n"
+
+msgid "Traffic Statistics"
+msgstr "流量统计"
+
+msgid "Overview"
+msgstr "概览"
+
+msgid "Settings"
+msgstr "设置"
+
+msgid "General settings"
+msgstr "常规设置"
+
+msgid "Enable"
+msgstr "启用"
+
+msgid "Storage path"
+msgstr "存储路径"
+
+msgid "Maximum devices per group"
+msgstr "每组最大设备数"
+
+msgid "Interface groups"
+msgstr "接口配置组"
+
+msgid "Display name"
+msgstr "显示名称"
+
+msgid "Network"
+msgstr "网络接口"
+
+msgid "Device override"
+msgstr "设备覆盖"
+
+msgid "Automatic from network"
+msgstr "根据网络自动选择"
+
+msgid "Write interval"
+msgstr "写入间隔"
+
+msgid "Retention"
+msgstr "保留时间"
+
+msgid "Interface group"
+msgstr "接口配置组"
+
+msgid "Time range"
+msgstr "时间范围"
+
+msgid "Device"
+msgstr "设备"
+
+msgid "Interface total"
+msgstr "接口总计"
+
+msgid "All devices"
+msgstr "所有设备"
+
+msgid "Last hour"
+msgstr "最近 1 小时"
+
+msgid "Last 6 hours"
+msgstr "最近 6 小时"
+
+msgid "Last 24 hours"
+msgstr "最近 24 小时"
+
+msgid "Last 7 days"
+msgstr "最近 7 天"
+
+msgid "Last 30 days"
+msgstr "最近 30 天"
+
+msgid "Custom"
+msgstr "自定义"
+
+msgid "Start time"
+msgstr "开始时间"
+
+msgid "End"
+msgstr "结束时间"
+
+msgid "Refresh"
+msgstr "刷新"
+
+msgid "Received"
+msgstr "接收"
+
+msgid "Transmitted"
+msgstr "发送"
+
+msgid "Total"
+msgstr "合计"
+
+msgid "Devices"
+msgstr "设备"
+
+msgid "Collector running"
+msgstr "采集器运行中"
+
+msgid "Collector stopped"
+msgstr "采集器已停止"
+
+msgid "Clear group history"
+msgstr "清除此组历史"
+
+msgid "Clear history?"
+msgstr "确认清除历史？"
+
+msgid "Cancel"
+msgstr "取消"
+
+msgid "Clear"
+msgstr "清除"
+
+msgid "No data in this time range yet."
+msgstr "此时间范围内暂时没有数据。"
+
+msgid "No devices in this range."
+msgstr "此时间范围内没有设备数据。"
+
+msgid "Receive IPv4"
+msgstr "接收 IPv4"
+
+msgid "Receive IPv6"
+msgstr "接收 IPv6"
+
+msgid "Transmit IPv4"
+msgstr "发送 IPv4"
+
+msgid "Transmit IPv6"
+msgstr "发送 IPv6"
+
+msgid "Traffic is counted in the kernel and written in batches. Receive and transmit are shown from the client device perspective."
+msgstr "流量由内核计数并分批写入；接收和发送方向均以客户端设备为视角。"
+
+msgid "Receive and transmit are from the client device perspective. Counters are split by IPv4 and IPv6."
+msgstr "接收和发送方向以客户端设备为视角，并分别统计 IPv4 与 IPv6。"
+
+msgid "Use an external disk path for long retention periods. /tmp is volatile and avoids flash writes."
+msgstr "长期保留建议使用外置存储路径；/tmp 为易失存储，可避免写入闪存。"
+
+msgid "Use an absolute path without spaces or parent-directory components."
+msgstr "请使用不含空格或上级目录片段的绝对路径。"
+
+msgid "Use a valid Linux interface name."
+msgstr "请输入有效的 Linux 接口名称。"
+
+msgid "Usually leave empty. Bridge member ports are discovered automatically."
+msgstr "通常留空即可，桥接成员端口会被自动发现。"
+
+msgid "Seconds. Longer intervals reduce flash writes."
+msgstr "单位为秒；更长的间隔可减少闪存写入。"
+
+msgid "Days of history retained for this group."
+msgstr "此配置组保留历史数据的天数。"
+
+msgid "LAN"
+msgstr "局域网"
+
+msgid "Loading…"
+msgstr "正在加载…"
+
+msgid "Reading statistics…"
+msgstr "正在读取统计数据…"
+
+msgid "Choose a valid custom time range."
+msgstr "请选择有效的自定义时间范围。"
+
+msgid "All saved history for the selected interface group will be deleted. Live counters are not interrupted."
+msgstr "将删除所选接口配置组的全部历史数据，实时计数不会中断。"
+
+msgid "offload-safe bridge accounting"
+msgstr "兼容流量卸载的桥接统计"
+
+msgid "basic interface accounting"
+msgstr "基础接口统计"
+
+msgid "%s · %s · every %s seconds · keep %s days"
+msgstr "%s · %s · 每 %s 秒写入 · 保留 %s 天"
+
+msgid "%s data points"
+msgstr "%s 个数据点"

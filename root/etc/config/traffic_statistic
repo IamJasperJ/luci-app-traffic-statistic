@@ -1,0 +1,11 @@
+config global 'main'
+	option enabled '1'
+	option storage_path '/etc/traffic-statistic/data'
+	option max_devices '256'
+
+config interface 'lan'
+	option enabled '1'
+	option name 'LAN'
+	option network 'lan'
+	option interval '300'
+	option retention_days '30'
