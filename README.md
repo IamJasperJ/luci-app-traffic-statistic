@@ -1,5 +1,7 @@
 # luci-app-traffic-statistic
 
+English | [简体中文](README.zh-CN.md)
+
 A low-overhead OpenWrt LuCI traffic accounting application. It records IPv4
 and IPv6 receive/transmit bytes per interface group and client MAC address.
 
