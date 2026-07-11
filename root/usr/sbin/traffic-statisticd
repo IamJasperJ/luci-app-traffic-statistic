@@ -111,10 +111,10 @@ append_group_rules() {
 		# shellcheck disable=SC2086
 		match="$(nft_string_set $br_ports)"
 		append_sets "$RUNDIR/bridge.sets" "$prefix" "$MAX_DEVICES"
-		printf '\t\tiifname %s ether type ip update @%s_tx4 { ether saddr }\n' "$match" "$prefix" >>"$RUNDIR/bridge.pre"
-		printf '\t\tiifname %s ether type ip6 update @%s_tx6 { ether saddr }\n' "$match" "$prefix" >>"$RUNDIR/bridge.pre"
-		printf '\t\toifname %s ether type ip update @%s_rx4 { ether daddr }\n' "$match" "$prefix" >>"$RUNDIR/bridge.post"
-		printf '\t\toifname %s ether type ip6 update @%s_rx6 { ether daddr }\n' "$match" "$prefix" >>"$RUNDIR/bridge.post"
+		printf '\t\tiifname %s ether saddr & 01:00:00:00:00:00 == 00:00:00:00:00:00 ether type ip update @%s_tx4 { ether saddr }\n' "$match" "$prefix" >>"$RUNDIR/bridge.pre"
+		printf '\t\tiifname %s ether saddr & 01:00:00:00:00:00 == 00:00:00:00:00:00 ether type ip6 update @%s_tx6 { ether saddr }\n' "$match" "$prefix" >>"$RUNDIR/bridge.pre"
+		printf '\t\toifname %s ether daddr & 01:00:00:00:00:00 == 00:00:00:00:00:00 ether type ip update @%s_rx4 { ether daddr }\n' "$match" "$prefix" >>"$RUNDIR/bridge.post"
+		printf '\t\toifname %s ether daddr & 01:00:00:00:00:00 == 00:00:00:00:00:00 ether type ip6 update @%s_rx6 { ether daddr }\n' "$match" "$prefix" >>"$RUNDIR/bridge.post"
 		HAS_BRIDGE=1
 		family="bridge"
 	fi
@@ -216,8 +216,7 @@ check_rules() {
 read_set() {
 	local family="$1" table="$2" setname="$3"
 	nft -nn list set "$family" "$table" "$setname" 2>/dev/null | awk '
-		/elements =/ {
-			line=$0
+		function parse(line,    n, items, i, m, f) {
 			sub(/^.*elements = \{[[:space:]]*/, "", line)
 			sub(/[[:space:]]*\}.*/, "", line)
 			n=split(line, items, /,[[:space:]]*/)
@@ -227,6 +226,12 @@ read_set() {
 				if (m >= 6 && f[2] == "counter" && f[5] == "bytes")
 					print tolower(f[1]), f[6]
 			}
+		}
+		/elements =/ { in_elements=1 }
+		in_elements {
+			line=$0
+			parse(line)
+			if ($0 ~ /}/) in_elements=0
 		}'
 }
 
