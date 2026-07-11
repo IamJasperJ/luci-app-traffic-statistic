@@ -196,7 +196,7 @@ stream_group_data() {
 }
 
 query_call() {
-	local input group start end bucket mac special dir now path role
+	local input group start end bucket mac dir now path role
 	read -r input
 	json_load "$input" || { echo '{"error":"invalid request"}'; return 1; }
 	json_get_var group group
@@ -204,7 +204,6 @@ query_call() {
 	json_get_var end end
 	json_get_var bucket bucket
 	json_get_var mac mac
-	json_get_var special special
 	json_cleanup
 	if ! valid_id "$group" || ! group_exists "$group"; then
 		echo '{"error":"invalid group"}'
@@ -217,7 +216,6 @@ query_call() {
 	valid_uint "$bucket" 60 2678400 || bucket=300
 	case "$mac" in ''|??:??:??:??:??:??) ;; *) echo '{"error":"invalid MAC"}'; return 1 ;; esac
 	mac="$(printf '%s' "$mac" | tr 'A-F' 'a-f')"
-	[ "$special" = "1" ] || special=0
 	path="$(storage_path)"
 	dir="${path}/${group}"
 	role="$(uci -q get "${CONFIG}.${group}.role")"
@@ -227,14 +225,14 @@ query_call() {
 		awk -F ',' -v start="$start" -v end="$end" '
 			NF >= 6 && $1 >= start && $1 <= end && length($2) == 17 && $2 !~ /[^0-9A-Fa-f:]/ { print }
 		' | sort -t ',' -k 1,1n | \
-		awk -F ',' -v start="$start" -v end="$end" -v bucket="$bucket" -v wanted="$mac" -v role="$role" -v special="$special" '
+		awk -F ',' -v start="$start" -v end="$end" -v bucket="$bucket" -v wanted="$mac" -v role="$role" '
 		function emit_point(    comma) {
 			if (!have_bucket) return
 			comma=(point_count++ ? "," : "")
 			printf "%s{\"t\":%.0f,\"rx4\":%.0f,\"rx6\":%.0f,\"tx4\":%.0f,\"tx6\":%.0f}", comma, current, prx4, prx6, ptx4, ptx6
 		}
 		BEGIN { printf "{\"points\":[" }
-		NF >= 6 && $1 >= start && $1 <= end && (wanted == "" || tolower($2) == wanted) && (special == 1 || tolower($2) !~ /^[0-9a-f][13579bdf]:/) {
+		NF >= 6 && $1 >= start && $1 <= end && (wanted == "" || tolower($2) == wanted) {
 			if (role == "client") {
 				rx4=$5; rx6=$6; tx4=$3; tx6=$4
 			} else {
@@ -287,9 +285,8 @@ case "$1" in
 		json_add_string group string
 		json_add_int start 0
 		json_add_int end 0
-			json_add_int bucket 0
-			json_add_string mac string
-			json_add_int special 0
+		json_add_int bucket 0
+		json_add_string mac string
 		json_close_object
 		json_add_object clear
 		json_add_string group string

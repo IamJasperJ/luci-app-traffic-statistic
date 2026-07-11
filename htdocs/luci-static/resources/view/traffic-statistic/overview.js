@@ -13,7 +13,7 @@ var callStatus = rpc.declare({
 var callQuery = rpc.declare({
 	object: 'traffic-statistic',
 	method: 'query',
-	params: [ 'group', 'start', 'end', 'bucket', 'mac', 'special' ],
+	params: [ 'group', 'start', 'end', 'bucket', 'mac' ],
 	expect: { '': {} }
 });
 
@@ -166,10 +166,9 @@ return view.extend({
 		this.mac = '';
 		this.chartMode = 'rate';
 		this.protocolDetail = true;
-		this.includeSpecial = false;
 
 		var root = E('div', { 'class': 'cbi-map ts-app' }, [
-			E('style', {}, '.ts-toolbar{display:flex;gap:.7rem;align-items:end;flex-wrap:wrap;margin:1rem 0;padding:1rem;border:1px solid rgba(127,127,127,.2);border-radius:9px}.ts-toolbar label{display:flex;flex-direction:column;gap:.25rem}.ts-toolbar label.ts-check{flex-direction:row;align-items:center;padding-bottom:.45rem}.ts-toolbar .ts-custom{display:none}.ts-segment{display:inline-flex;border:1px solid rgba(127,127,127,.3);border-radius:6px;overflow:hidden}.ts-segment button{border:0;border-radius:0;background:transparent;padding:.48rem .8rem}.ts-segment button.active{background:#1677ff;color:#fff}.ts-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.8rem;margin:1rem 0}.ts-card,.ts-panel{padding:1rem;border:1px solid rgba(127,127,127,.22);border-radius:9px;background:rgba(127,127,127,.025)}.ts-card strong{display:block;font-size:1.45rem;margin-top:.35rem}.ts-panel{margin:1rem 0}.ts-panel h3{margin:0 0 .8rem}.ts-chart-wrap{position:relative}.ts-chart{width:100%;height:auto;min-height:280px;color:#64748b}.ts-tooltip{position:absolute;z-index:2;min-width:205px;padding:.7rem;background:rgba(255,255,255,.96);color:#1f2937;border:1px solid #d1d5db;border-radius:7px;box-shadow:0 5px 18px rgba(0,0,0,.16);pointer-events:none}.ts-tooltip strong{display:block;margin-bottom:.4rem}.ts-tooltip div{display:grid;grid-template-columns:1rem 1fr auto;gap:.3rem;align-items:center;margin:.2rem 0}.ts-tooltip b{font-weight:600}.ts-legend{display:flex;gap:1rem;flex-wrap:wrap;justify-content:center}.ts-legend-dot{display:inline-block;width:.72rem;height:.72rem;border-radius:3px;margin-right:.35rem}.ts-empty{padding:4rem 1rem;text-align:center;opacity:.7}.ts-state{display:inline-block;padding:.2rem .55rem;border-radius:999px;background:#d9f7be;color:#135200}.ts-state.bad{background:#fff1f0;color:#a8071a}.ts-note{opacity:.75}.ts-table-wrap{overflow:auto}.ts-devices{display:grid;grid-template-columns:minmax(250px,.8fr) minmax(420px,1.7fr);gap:1.2rem}.ts-rank-row{display:grid;grid-template-columns:minmax(100px,1fr) 2fr auto;gap:.6rem;align-items:center;margin:.75rem 0}.ts-rank-track{height:.55rem;background:rgba(127,127,127,.15);border-radius:99px;overflow:hidden}.ts-rank-fill{height:100%;background:#1677ff;border-radius:99px}@media(max-width:900px){.ts-devices{grid-template-columns:1fr}.ts-chart{min-height:220px}}'),
+			E('style', {}, '.ts-toolbar{display:flex;gap:.7rem;align-items:end;flex-wrap:wrap;margin:1rem 0;padding:1rem;border:1px solid rgba(127,127,127,.2);border-radius:9px}.ts-toolbar label{display:flex;flex-direction:column;gap:.25rem}.ts-toolbar .ts-custom{display:none}.ts-segment{display:inline-flex;border:1px solid rgba(127,127,127,.3);border-radius:6px;overflow:hidden}.ts-segment button{border:0;border-radius:0;background:transparent;padding:.48rem .8rem}.ts-segment button.active{background:#1677ff;color:#fff}.ts-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.8rem;margin:1rem 0}.ts-card,.ts-panel{padding:1rem;border:1px solid rgba(127,127,127,.22);border-radius:9px;background:rgba(127,127,127,.025)}.ts-card strong{display:block;font-size:1.45rem;margin-top:.35rem}.ts-panel{margin:1rem 0}.ts-panel h3{margin:0 0 .8rem}.ts-chart-wrap{position:relative}.ts-chart{width:100%;height:auto;min-height:280px;color:#64748b}.ts-tooltip{position:absolute;z-index:2;min-width:205px;padding:.7rem;background:rgba(255,255,255,.96);color:#1f2937;border:1px solid #d1d5db;border-radius:7px;box-shadow:0 5px 18px rgba(0,0,0,.16);pointer-events:none}.ts-tooltip strong{display:block;margin-bottom:.4rem}.ts-tooltip div{display:grid;grid-template-columns:1rem 1fr auto;gap:.3rem;align-items:center;margin:.2rem 0}.ts-tooltip b{font-weight:600}.ts-legend{display:flex;gap:1rem;flex-wrap:wrap;justify-content:center}.ts-legend-dot{display:inline-block;width:.72rem;height:.72rem;border-radius:3px;margin-right:.35rem}.ts-empty{padding:4rem 1rem;text-align:center;opacity:.7}.ts-state{display:inline-block;padding:.2rem .55rem;border-radius:999px;background:#d9f7be;color:#135200}.ts-state.bad{background:#fff1f0;color:#a8071a}.ts-note{opacity:.75}.ts-table-wrap{overflow:auto}.ts-devices{display:grid;grid-template-columns:minmax(250px,.8fr) minmax(420px,1.7fr);gap:1.2rem}.ts-rank-row{display:grid;grid-template-columns:minmax(100px,1fr) 2fr auto;gap:.6rem;align-items:center;margin:.75rem 0}.ts-rank-track{height:.55rem;background:rgba(127,127,127,.15);border-radius:99px;overflow:hidden}.ts-rank-fill{height:100%;background:#1677ff;border-radius:99px}@media(max-width:900px){.ts-devices{grid-template-columns:1fr}.ts-chart{min-height:220px}}'),
 			E('h2', {}, _('Traffic Statistics')),
 			E('p', { 'class': 'ts-note' }, _('Receive and transmit follow the configured perspective. Counters are split by IPv4 and IPv6.')),
 			E('div', { id: 'ts-status' }),
@@ -196,7 +195,6 @@ return view.extend({
 			E('label', { 'class': 'ts-custom', id: 'ts-start-wrap' }, [ _('Start time'), E('input', { id: 'ts-start', type: 'datetime-local' }) ]),
 			E('label', { 'class': 'ts-custom', id: 'ts-end-wrap' }, [ _('End'), E('input', { id: 'ts-end', type: 'datetime-local' }) ]),
 			E('label', {}, [ _('Device'), E('select', { id: 'ts-mac', change: ui.createHandlerFn(this, 'refresh') }, [ E('option', { value: '' }, _('All devices')) ].concat(devices.map(function(d) { return E('option', { value: d.mac }, hostLabel(d.mac, this.status.hosts)); }, this))) ]),
-			E('label', { 'class': 'ts-check' }, [ E('input', { id: 'ts-special', type: 'checkbox', change: ui.createHandlerFn(this, 'specialChanged') }), E('span', {}, _('Include multicast / broadcast')) ]),
 			E('div', { 'class': 'ts-segment' }, [
 				E('button', { id: 'ts-mode-rate', 'class': 'active', click: ui.createHandlerFn(this, 'setChartMode', 'rate') }, _('Rate')),
 				E('button', { id: 'ts-mode-volume', click: ui.createHandlerFn(this, 'setChartMode', 'volume') }, _('Volume'))
@@ -221,12 +219,6 @@ return view.extend({
 		this.root.querySelector('#ts-protocol-total').classList.toggle('active', !detail);
 		this.root.querySelector('#ts-protocol-detail').classList.toggle('active', detail);
 		this.renderResults();
-	},
-
-	specialChanged: function() {
-		this.includeSpecial = this.root.querySelector('#ts-special').checked;
-		this.root.querySelector('#ts-mac').value = '';
-		return this.refresh();
 	},
 
 	rangeChanged: function() {
@@ -261,7 +253,7 @@ return view.extend({
 		this.group = this.root.querySelector('#ts-group').value;
 		this.mac = this.root.querySelector('#ts-mac').value;
 		ui.showModal(_('Loading…'), [ E('p', { 'class': 'spinning' }, _('Reading statistics…')) ]);
-		return Promise.all([ callStatus(), callQuery(this.group, range.start, range.end, chooseBucket(range.start, range.end), this.mac, this.includeSpecial ? 1 : 0) ]).then(function(data) {
+		return Promise.all([ callStatus(), callQuery(this.group, range.start, range.end, chooseBucket(range.start, range.end), this.mac) ]).then(function(data) {
 			this.status = data[0]; this.query = data[1]; this.range = range;
 			if (!this.mac) this.updateDeviceOptions();
 			this.renderStatus(); this.renderResults(); ui.hideModal();

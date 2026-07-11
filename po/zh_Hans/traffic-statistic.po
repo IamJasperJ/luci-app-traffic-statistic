@@ -60,9 +60,6 @@ msgstr "接口总计"
 msgid "All devices"
 msgstr "所有设备"
 
-msgid "Include multicast / broadcast"
-msgstr "包含组播 / 广播地址"
-
 msgid "Last hour"
 msgstr "最近 1 小时"
 
