@@ -17,7 +17,7 @@ return view.extend({
 		var networks = data[1] || [];
 		var devices = data[2] || [];
 		var m = new form.Map('traffic_statistic', _('Traffic Statistics'),
-			_('Traffic is counted in the kernel and written in batches. Receive and transmit are shown from the client device perspective.'));
+			_('Traffic is counted in the kernel and written in batches. Receive and transmit follow the perspective configured for each interface group.'));
 
 		var s = m.section(form.NamedSection, 'main', 'global', _('General settings'));
 		s.anonymous = true;
@@ -83,6 +83,13 @@ return view.extend({
 			return !value || /^[A-Za-z0-9_.:-]{1,15}$/.test(value) || _('Use a valid Linux interface name.');
 		};
 		o.description = _('Usually leave empty. Bridge member ports are discovered automatically.');
+
+		o = s.option(form.ListValue, 'role', _('Traffic perspective'));
+		o.value('server', _('Router as server / access point'));
+		o.value('client', _('Router as client'));
+		o.default = 'server';
+		o.rmempty = false;
+		o.description = _('Server mode shows traffic from connected devices: traffic entering the router is transmitted and traffic leaving toward devices is received. Client mode uses the router interface perspective: ingress is received and egress is transmitted.');
 
 		o = s.option(form.Value, 'interval', _('Write interval'));
 		o.default = '300';

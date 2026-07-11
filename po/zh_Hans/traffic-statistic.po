@@ -60,6 +60,9 @@ msgstr "接口总计"
 msgid "All devices"
 msgstr "所有设备"
 
+msgid "Include multicast / broadcast"
+msgstr "包含组播 / 广播地址"
+
 msgid "Last hour"
 msgstr "最近 1 小时"
 
@@ -87,6 +90,15 @@ msgstr "结束时间"
 msgid "Refresh"
 msgstr "刷新"
 
+msgid "Rate"
+msgstr "速率"
+
+msgid "Volume"
+msgstr "流量"
+
+msgid "IPv4 + IPv6"
+msgstr "IPv4 + IPv6"
+
 msgid "Received"
 msgstr "接收"
 
@@ -95,6 +107,24 @@ msgstr "发送"
 
 msgid "Total"
 msgstr "合计"
+
+msgid "Average rate"
+msgstr "平均速率"
+
+msgid "Peak rate"
+msgstr "峰值速率"
+
+msgid "Across the selected range"
+msgstr "所选时间范围内"
+
+msgid "Highest time bucket"
+msgstr "最高时间桶"
+
+msgid "Traffic trend"
+msgstr "流量趋势"
+
+msgid "Device traffic ranking"
+msgstr "设备流量排行"
 
 msgid "Devices"
 msgstr "设备"
@@ -138,8 +168,32 @@ msgstr "发送 IPv6"
 msgid "Traffic is counted in the kernel and written in batches. Receive and transmit are shown from the client device perspective."
 msgstr "流量由内核计数并分批写入；接收和发送方向均以客户端设备为视角。"
 
+msgid "Traffic is counted in the kernel and written in batches. Receive and transmit follow the perspective configured for each interface group."
+msgstr "流量由内核计数并分批写入；接收和发送方向遵循各接口配置组选择的视角。"
+
 msgid "Receive and transmit are from the client device perspective. Counters are split by IPv4 and IPv6."
 msgstr "接收和发送方向以客户端设备为视角，并分别统计 IPv4 与 IPv6。"
+
+msgid "Receive and transmit follow the configured perspective. Counters are split by IPv4 and IPv6."
+msgstr "接收和发送方向遵循已配置的视角，并分别统计 IPv4 与 IPv6。"
+
+msgid "Traffic perspective"
+msgstr "流量视角"
+
+msgid "Router as server / access point"
+msgstr "路由器作为服务端 / 接入点"
+
+msgid "Router as client"
+msgstr "路由器作为客户端"
+
+msgid "Server mode shows traffic from connected devices: traffic entering the router is transmitted and traffic leaving toward devices is received. Client mode uses the router interface perspective: ingress is received and egress is transmitted."
+msgstr "服务端模式以所连接设备为视角：进入路由器的流量为发送，路由器发往设备的流量为接收。客户端模式以路由器接口为视角：入站为接收，出站为发送。"
+
+msgid "router as client"
+msgstr "路由器作为客户端"
+
+msgid "router as server"
+msgstr "路由器作为服务端"
 
 msgid "Use an external disk path for long retention periods. /tmp is volatile and avoids flash writes."
 msgstr "长期保留建议使用外置存储路径；/tmp 为易失存储，可避免写入闪存。"
@@ -182,6 +236,9 @@ msgstr "基础接口统计"
 
 msgid "%s · %s · every %s seconds · keep %s days"
 msgstr "%s · %s · 每 %s 秒写入 · 保留 %s 天"
+
+msgid "%s · %s · %s · every %s seconds · keep %s days"
+msgstr "%s · %s · %s · 每 %s 秒写入 · 保留 %s 天"
 
 msgid "%s data points"
 msgstr "%s 个数据点"
