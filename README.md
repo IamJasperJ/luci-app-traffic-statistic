@@ -21,6 +21,13 @@ and IPv6 receive/transmit bytes per interface group and client MAC address.
   is intended for bridge groups; offloaded traffic on a raw L3 interface may
   be under-counted and is marked as basic accounting in LuCI.
 
+> **Accounting capability note:** This application can account for traffic
+> traversing bridge ports with reasonable accuracy and distinguish IPv4/IPv6
+> by client MAC address. Complete accounting cannot be guaranteed for a
+> non-bridge L3 uplink while Flow Offloading is enabled unless MediaTek PPE
+> hardware flow-table counters are integrated and the synthetic MAC matching
+> used for locally generated outbound traffic is corrected.
+
 ## Configuration
 
 The UCI package is `traffic_statistic`. Every `config interface` section is an
